@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -39,6 +39,7 @@ jobs:
           npm run build
           cp dist/index.html dist/404.html
 
+      # Deployment method 1: Direct GitHub Pages Action (When Source = GitHub Actions)
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -47,3 +48,11 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      # Deployment method 2: Push to gh-pages branch (When Source = Deploy from branch gh-pages)
+      - name: Deploy to gh-pages branch (Dual-Support Fallback)
+        uses: peaceiris/actions-gh-pages@v4
+        if: always()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
