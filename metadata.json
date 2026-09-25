@@ -1,0 +1,6 @@
+{
+  "name": "CBT Try Out TKA - SMK Negeri 2 Gorontalo",
+  "description": "Aplikasi CBT Try Out TKA Bahasa Indonesia SMK Negeri 2 Gorontalo dengan anti-cheat ketat, sinkronisasi real-time Google Spreadsheet, validasi rombel siswa, dan dashboard admin monitoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
