@@ -222,54 +222,21 @@ git remote add origin https://github.com/<USERNAME-ANDA>/cbt-smkn2-gorontalo.git
 git push -u origin main
 ```
 
-### Langkah 3: Aktifkan GitHub Pages
-1. Buka halaman repository di GitHub > tab **Settings** > **Pages**.
-2. Pada bagian **Build and deployment** > **Source**, pilih **GitHub Actions**.
-3. Pilih template **Static HTML / Vite** atau buat file workflow sederhana `.github/workflows/deploy.yml`:
-```yaml
-name: Deploy to GitHub Pages
-
-on:
-  push:
-    branches: ["main"]
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
-jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install dependencies
-        run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './dist'
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-```
-4. Setelah build selesai, tautan aplikasi Anda akan aktif (contoh: `https://<USERNAME-ANDA>.github.io/cbt-smkn2-gorontalo/`).
+### Langkah 3: Periksa GitHub Actions & Dapatkan Link Aplikasi
+1. File workflow otomatis `.github/workflows/deploy.yml` dan konfigurasi `base: './'` pada `vite.config.ts` **sudah tersedia dan siap pakai**.
+2. Lakukan push perubahan terbaru ke GitHub:
+   ```bash
+   git add .
+   git commit -m "fix: tambahkan workflow github actions dan base url vite"
+   git push origin main
+   ```
+3. Buka tab **Actions** di repository GitHub Anda:
+   - Anda akan melihat workflow **Deploy to GitHub Pages** sedang berjalan otomatis (indikator kuning berputar).
+   - Tunggu sekitar 30–60 detik hingga muncul tanda **Centang Hijau (Success)**.
+4. Buka tab **Settings** > **Pages**:
+   - Link website aplikasi CBT Anda akan langsung muncul di bagian atas:
+   - Contoh: `https://<USERNAME-ANDA>.github.io/<NAMA-REPO>/`
+5. Aplikasi CBT SMK Negeri 2 Gorontalo sekarang sudah dapat langsung diakses oleh seluruh siswa dari HP atau komputer manapun!
 
 ---
 
