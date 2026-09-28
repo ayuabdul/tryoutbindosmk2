@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { PASSAGES, QUESTIONS, Question, PgQuestion, BsQuestion, McmaQuestion, isQuestionAnswered, calculateScore } from '../data/examData';
 import { AntiCheatController, detectDeviceInfo } from '../services/telemetryService';
 import { SubmissionPayload, sendToGoogleSpreadsheet } from '../services/sheetService';
-import { AlertCircle, Clock, Check, ChevronLeft, ChevronRight, Menu, X, ShieldAlert, LogOut, CheckCircle } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Clock, Check, ChevronLeft, ChevronRight, Menu, X, ShieldAlert, LogOut, CheckCircle } from 'lucide-react';
 
 interface ExamScreenProps {
   student: {
@@ -27,6 +27,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
   const [activeViolationModal, setActiveViolationModal] = useState<string | null>(null);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState<boolean>(false);
   const [isConfirmFinishOpen, setIsConfirmFinishOpen] = useState<boolean>(false);
+  const [showIncompleteModal, setShowIncompleteModal] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const antiCheatRef = useRef<AntiCheatController | null>(null);
@@ -127,6 +128,21 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
   const answeredCount = useMemo(() => {
     return QUESTIONS.filter(q => isQuestionAnswered(q, answers[q.id])).length;
   }, [answers]);
+
+  const unansweredQuestions = useMemo(() => {
+    return QUESTIONS
+      .map((q, idx) => ({ q, idx, number: idx + 1 }))
+      .filter(({ q }) => !isQuestionAnswered(q, answers[q.id]));
+  }, [answers]);
+
+  const handleAttemptFinish = () => {
+    setIsMobileNavOpen(false);
+    if (unansweredQuestions.length > 0) {
+      setShowIncompleteModal(true);
+    } else {
+      setIsConfirmFinishOpen(true);
+    }
+  };
 
   const formatTimer = (secs: number) => {
     const m = String(Math.floor(secs / 60)).padStart(2, '0');
@@ -284,8 +300,8 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
 
           {/* Finish Button on Desktop */}
           <button
-            onClick={() => setIsConfirmFinishOpen(true)}
-            className="hidden md:flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs"
+            onClick={handleAttemptFinish}
+            className="hidden md:flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer"
           >
             <CheckCircle className="w-4 h-4" />
             <span>Kumpulkan</span>
@@ -310,7 +326,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
                 <button
                   key={q.id}
                   onClick={() => handleJumpTo(idx)}
-                  className={`aspect-square rounded-lg font-semibold text-xs border transition-all flex items-center justify-center relative ${
+                  className={`aspect-square rounded-lg font-semibold text-xs border transition-all flex items-center justify-center relative cursor-pointer ${
                     isCurrent
                       ? 'border-[#132a4c] bg-blue-50 text-[#132a4c] font-bold ring-2 ring-blue-600/30'
                       : answered
@@ -333,14 +349,16 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
               <span>Sudah dijawab ({answeredCount})</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-white border border-gray-300 inline-block" />
-              <span>Belum dijawab ({30 - answeredCount})</span>
+              <span className={`w-3 h-3 rounded border inline-block ${unansweredQuestions.length > 0 ? 'bg-amber-100 border-amber-400' : 'bg-white border-gray-300'}`} />
+              <span className={unansweredQuestions.length > 0 ? 'font-bold text-amber-700' : ''}>
+                Belum dijawab ({unansweredQuestions.length})
+              </span>
             </div>
           </div>
 
           <button
-            onClick={() => setIsConfirmFinishOpen(true)}
-            className="w-full mt-5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-2.5 rounded-lg shadow-sm transition-colors"
+            onClick={handleAttemptFinish}
+            className="w-full mt-5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-2.5 rounded-lg shadow-sm transition-colors cursor-pointer"
           >
             Selesai &amp; Kumpulkan
           </button>
@@ -576,8 +594,8 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
         </button>
 
         <button
-          onClick={() => setIsConfirmFinishOpen(true)}
-          className="bg-red-600 text-white font-bold text-xs px-3 py-2 rounded-lg shadow-xs"
+          onClick={handleAttemptFinish}
+          className="bg-red-600 active:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-lg shadow-xs cursor-pointer"
         >
           Selesai
         </button>
@@ -590,7 +608,12 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
             <div className="flex items-center justify-between pb-3 border-b border-gray-100 mb-3">
               <div>
                 <h3 className="font-bold text-sm text-[#132a4c]">Daftar Navigasi Soal</h3>
-                <p className="text-[11px] text-gray-500">Terjawab: {answeredCount} dari 30 soal</p>
+                <p className="text-[11px] text-gray-500">
+                  Terjawab: <b className="text-emerald-700">{answeredCount}</b> dari 30 soal
+                  {unansweredQuestions.length > 0 && (
+                    <span className="text-amber-600 font-bold ml-1">({unansweredQuestions.length} kosong)</span>
+                  )}
+                </p>
               </div>
               <button
                 onClick={() => setIsMobileNavOpen(false)}
@@ -608,7 +631,7 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
                   <button
                     key={q.id}
                     onClick={() => handleJumpTo(idx)}
-                    className={`aspect-square rounded-lg font-semibold text-xs border flex items-center justify-center relative ${
+                    className={`aspect-square rounded-lg font-semibold text-xs border flex items-center justify-center relative cursor-pointer ${
                       isCurrent
                         ? 'border-[#132a4c] bg-blue-50 text-[#132a4c] font-bold ring-2 ring-blue-500'
                         : answered
@@ -626,11 +649,8 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
             </div>
 
             <button
-              onClick={() => {
-                setIsMobileNavOpen(false);
-                setIsConfirmFinishOpen(true);
-              }}
-              className="w-full bg-red-600 text-white font-bold text-xs py-3 rounded-xl shadow-xs"
+              onClick={handleAttemptFinish}
+              className="w-full bg-red-600 text-white font-bold text-xs py-3 rounded-xl shadow-xs cursor-pointer"
             >
               Kumpulkan Ujian Sekarang
             </button>
@@ -674,23 +694,96 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
         </div>
       )}
 
-      {/* Submission Confirmation Modal */}
+      {/* MODAL 1: PERINGATAN WAJIB JAWAB SEMUA SOAL (Siswa Dilarang Mengakhiri Sebelum Menjawab 30 Soal) */}
+      {showIncompleteModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border-t-4 border-amber-500">
+            <div className="w-14 h-14 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+
+            <h3 className="text-lg font-bold text-gray-900">
+              Belum Bisa Mengumpulkan Ujian!
+            </h3>
+            <div className="inline-flex items-center gap-1 bg-amber-100 text-amber-900 font-bold text-xs px-3 py-1 rounded-full mt-2">
+              <span>{unansweredQuestions.length} Soal Belum Terisi</span>
+            </div>
+
+            <p className="text-xs text-gray-600 mt-3 mb-4 leading-relaxed">
+              Anda baru menjawab <b>{answeredCount}</b> dari <b>{QUESTIONS.length}</b> soal.
+              <br />
+              <span className="font-semibold text-red-600 block mt-1">
+                Aturan ujian mengharuskan seluruh 30 butir soal dijawab secara lengkap sebelum Anda diperbolehkan mengumpulkan ujian.
+              </span>
+            </p>
+
+            {/* List of unanswered question numbers with instant jump buttons */}
+            <div className="text-left mb-4">
+              <div className="text-[11px] font-bold text-gray-700 mb-2 uppercase tracking-wide flex items-center justify-between">
+                <span>Nomor Soal yang Belum Terjawab:</span>
+                <span className="text-[10px] text-gray-400 font-normal">Klik untuk langsung membuka</span>
+              </div>
+              <div className="grid grid-cols-5 sm:grid-cols-6 gap-1.5 max-h-40 overflow-y-auto p-2.5 bg-gray-50 border border-gray-200 rounded-xl">
+                {unansweredQuestions.map(({ q, idx, number }) => (
+                  <button
+                    key={q.id}
+                    onClick={() => {
+                      setShowIncompleteModal(false);
+                      handleJumpTo(idx);
+                    }}
+                    className="py-1.5 px-1 bg-white hover:bg-amber-50 active:bg-amber-100 border border-amber-300 rounded-lg text-xs font-bold text-amber-900 shadow-xs transition-colors flex flex-col items-center justify-center cursor-pointer"
+                  >
+                    <span>No. {number}</span>
+                    <span className="text-[9px] text-amber-600 font-normal">Buka</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowIncompleteModal(false);
+                  if (unansweredQuestions.length > 0) {
+                    handleJumpTo(unansweredQuestions[0].idx);
+                  }
+                }}
+                className="w-full py-3 px-4 bg-[#132a4c] hover:bg-[#1e3a63] text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+              >
+                Lanjutkan Menjawab (Buka Soal No. {unansweredQuestions[0]?.number})
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowIncompleteModal(false)}
+                className="w-full py-2 px-3 border border-gray-200 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-50 cursor-pointer"
+              >
+                Tutup Peringatan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: KONFIRMASI PENGUMPULAN (Hanya Aktif Jika 30 Soal Telah Lengkap Terjawab) */}
       {isConfirmFinishOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl">
-            <div className="w-12 h-12 rounded-full bg-blue-100 text-[#132a4c] flex items-center justify-center mx-auto mb-3">
-              <CheckCircle className="w-6 h-6" />
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl border-t-4 border-emerald-500">
+            <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+              <CheckCircle className="w-7 h-7" />
             </div>
+
             <h3 className="text-lg font-bold text-[#132a4c]">Konfirmasi Pengumpulan Ujian</h3>
-            <p className="text-xs text-gray-600 mt-2 mb-4 leading-relaxed">
-              Anda telah menjawab <b>{answeredCount}</b> dari <b>{QUESTIONS.length}</b> soal.
-              {answeredCount < QUESTIONS.length && (
-                <span className="block mt-2 font-semibold text-amber-600">
-                  Masih terdapat {QUESTIONS.length - answeredCount} soal yang belum Anda jawab!
-                </span>
-              )}
-              <br />
-              Setelah mengumpulkan, jawaban akan langsung tersimpan di Google Spreadsheet dan Anda tidak dapat mengubah jawaban lagi.
+            
+            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 font-bold text-xs px-3 py-1 rounded-full mt-2 border border-emerald-200">
+              <Check className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Seluruh 30 Soal Telah Lengkap Terjawab</span>
+            </div>
+
+            <p className="text-xs text-gray-600 mt-3 mb-5 leading-relaxed">
+              Anda telah mengisi seluruh jawaban untuk <b>{QUESTIONS.length} butir soal</b> CBT Bahasa Indonesia.
+              <br /><br />
+              Setelah mengumpulkan, jawaban dan nilai Anda akan langsung disinkronkan ke <b>Google Spreadsheet Pengawas</b> dan sesi ujian akan resmi selesai.
             </p>
 
             <div className="flex gap-2">
@@ -698,17 +791,21 @@ export const ExamScreen: React.FC<ExamScreenProps> = ({ student, onFinishExam })
                 type="button"
                 disabled={isSubmitting}
                 onClick={() => setIsConfirmFinishOpen(false)}
-                className="flex-1 py-2.5 px-3 border border-gray-200 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                className="flex-1 py-2.5 px-3 border border-gray-200 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer"
               >
                 Periksa Kembali
               </button>
               <button
                 type="button"
-                disabled={isSubmitting}
-                onClick={() => handleTriggerFinish('Dikumpulkan secara normal oleh siswa.', false)}
-                className="flex-2 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md"
+                disabled={isSubmitting || unansweredQuestions.length > 0}
+                onClick={() => handleTriggerFinish('Dikumpulkan secara normal oleh siswa (30 soal selesai).', false)}
+                className={`flex-2 py-2.5 px-4 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-colors ${
+                  isSubmitting || unansweredQuestions.length > 0
+                    ? 'bg-gray-400 text-white cursor-not-allowed'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
               >
-                {isSubmitting ? 'Menyimpan...' : 'Ya, Kumpulkan Sekarang'}
+                {isSubmitting ? 'Menyimpan ke Spreadsheet...' : 'Ya, Kumpulkan Sekarang'}
               </button>
             </div>
           </div>

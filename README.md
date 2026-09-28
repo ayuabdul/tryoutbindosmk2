@@ -179,27 +179,112 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) || "";
+  var callback = (e && e.parameter && e.parameter.callback) || "";
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. UNDUH SELURUH HASIL SISWA (SINKRONISASI ANTAR-PERANGKAT PROKTOR)
+  if (action === "read" || action === "getSubmissions" || action === "getData") {
+    var sheetHasil = ss.getSheetByName("HASIL_UJIAN");
+    if (!sheetHasil) {
+      return createJsonResponse({ status: "success", count: 0, data: [] }, callback);
+    }
+    var rows = sheetHasil.getDataRange().getValues();
+    var list = [];
+    for (var i = 1; i < rows.length; i++) {
+      var r = rows[i];
+      var nisnStr = String(r[1] || "").replace(/^'/, "").trim();
+      var namaStr = String(r[3] || "").trim();
+      if (!nisnStr && !namaStr) continue;
+
+      list.push({
+        timestamp: String(r[0] || ""),
+        nisn: nisnStr,
+        nipd: String(r[2] || "").replace(/^'/, "").trim(),
+        nama: namaStr,
+        rombel: String(r[4] || ""),
+        jurusan: String(r[5] || ""),
+        score: Number(r[6]) || 0,
+        correctCount: Number(r[7]) || 0,
+        totalQuestions: Number(r[8]) || 30,
+        timeUsedFormatted: String(r[9] || ""),
+        violationsCount: Number(r[10]) || 0,
+        combinedLog: String(r[11] || ""),
+        status: String(r[12] || "Selesai"),
+        submissionId: String(r[13] || "")
+      });
+    }
+    return createJsonResponse({ status: "success", count: list.length, data: list }, callback);
+  }
+
+  // 2. HAPUS SISWA DARI SPREADSHEET (VIA GET)
+  if (action === "delete") {
+    var targetNisn = String((e && e.parameter && e.parameter.nisn) || "").replace(/^'/, "").trim();
+    var deleted = deleteRowByNisn(ss, targetNisn);
+    return createJsonResponse({
+      status: "success",
+      deleted: deleted,
+      message: "Siswa NISN " + targetNisn + (deleted ? " berhasil dihapus." : " tidak ditemukan.")
+    }, callback);
+  }
+
   return ContentService.createTextOutput("CBT SMK Negeri 2 Gorontalo Apps Script Webhook is ACTIVE.");
+}
+
+function deleteRowByNisn(ss, nisn) {
+  if (!nisn) return false;
+  var deleted = false;
+  var sheetHasil = ss.getSheetByName("HASIL_UJIAN");
+  if (sheetHasil) {
+    var rows = sheetHasil.getDataRange().getValues();
+    for (var i = rows.length - 1; i >= 1; i--) {
+      var cellNisn = String(rows[i][1] || "").replace(/^'/, "").trim();
+      if (cellNisn === String(nisn).trim()) {
+        sheetHasil.deleteRow(i + 1);
+        deleted = true;
+      }
+    }
+  }
+  var sheetViol = ss.getSheetByName("LOG_PELANGGARAN");
+  if (sheetViol) {
+    var vRows = sheetViol.getDataRange().getValues();
+    for (var j = vRows.length - 1; j >= 1; j--) {
+      var vNisn = String(vRows[j][1] || "").replace(/^'/, "").trim();
+      if (vNisn === String(nisn).trim()) {
+        sheetViol.deleteRow(j + 1);
+      }
+    }
+  }
+  return deleted;
+}
+
+function createJsonResponse(data, callback) {
+  var json = JSON.stringify(data);
+  if (callback) {
+    return ContentService.createTextOutput(callback + "(" + json + ")")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(json)
+    .setMimeType(ContentService.MimeType.JSON);
 }
 ```
 
 ### Langkah 4: Terapkan (Deploy) Web App
 1. Klik tombol **Simpan (Save)**.
-2. Klik tombol biru **Terapkan (Deploy)** di kanan atas > pilih **Penerapan baru (New deployment)**.
+2. Klik tombol biru **Terapkan (Deploy)** di kanan atas > pilih **Kelola penerapan (Manage deployments)** atau **Penerapan baru (New deployment)**.
 3. Klik ikon gerigi > pilih jenis **Aplikasi Web (Web app)**.
 4. Isi konfigurasi:
-   - Deskripsi: `CBT SMK2 Sync`
+   - Deskripsi: `CBT SMK2 Sync & Delete`
    - Jalankan sebagai (*Execute as*): **Saya (email Anda)**
    - Yang memiliki akses (*Who has access*): **Siapa saja (Anyone)** *(PENTING!)*
 5. Klik **Terapkan (Deploy)**.
 6. Berikan izin akses (*Review Permissions* > Pilih Akun > *Advanced* > *Go to ... (unsafe)* > *Allow*).
 7. Salin **URL Aplikasi Web** (berakhiran `/exec`).
 
-### Langkah 5: URL Webhook Telah Tersemat Otomatis
-URL Google Apps Script berikut telah tersemat secara permanen sebagai **default Webhook** di dalam aplikasi:
-`https://script.google.com/macros/s/AKfycbzF-RQtr8LbchgP9Jm0nsy4ng6If1lacIab8LTf_s0myqJ1V4hAQ-5MSm_nXpeBBulQ/exec`
-
-Sehingga setiap kali siswa menyelesaikan ujian atau saat Anda mempublikasikan aplikasi ini ke GitHub, data hasil ujian langsung terkirim secara otomatis ke Google Spreadsheet Anda tanpa perlu memasukkan URL ulang. Anda juga tetap dapat menguji coba pengiriman data melalui **Portal Guru** > tab **Pengaturan Spreadsheet & Antrean** > **Uji Coba Kirim Data Dummy**.
+### Langkah 5: Fitur Sinkronisasi Lintas Perangkat & Hapus Siswa
+1. **Unduh Data di Device Lain**: Jika pengawas membuka Dashboard Admin di laptop/HP lain, cukup klik tombol biru **"Sinkronkan Data"** di bagian atas atau **"Sinkronkan Spreadsheet"** di bilah filter. Seluruh baris data siswa yang telah submit di Google Spreadsheet akan langsung terunduh dan masuk ke monitoring secara instan!
+2. **Hapus Siswa & Spreadsheet**: Pengawas dapat mengklik tombol ikon sampah merah (🗑️) di baris siswa untuk menghapus siswa tersebut dari daftar dan **otomatis menghapus barisnya di Google Spreadsheet**. Siswa yang dihapus dapat login kembali untuk mengerjakan ujian ulang jika diizinkan pengawas.
+3. **Pencegahan Mengakhiri Ujian**: Siswa **tidak dapat mengumpulkan ujian sebelum menjawab lengkap seluruh 30 butir soal**. Jika ada soal yang terlewat, muncul dialog interaktif berisi daftar nomor soal yang belum terisi agar siswa dapat langsung membukanya.
 
 ---
 

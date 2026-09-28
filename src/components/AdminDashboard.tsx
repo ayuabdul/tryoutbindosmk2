@@ -8,7 +8,11 @@ import {
   flushOfflineQueue,
   getSubmittedNisnList,
   GOOGLE_APPS_SCRIPT_CODE,
-  SubmissionPayload
+  SubmissionPayload,
+  fetchSubmissionsFromSpreadsheet,
+  deleteStudentSubmission,
+  getSyncedSubmissions,
+  DEFAULT_WEBHOOK_URL
 } from '../services/sheetService';
 import {
   getExamToken,
@@ -34,7 +38,9 @@ import {
   FileSpreadsheet,
   KeyRound,
   ShieldCheck,
-  Lock
+  Lock,
+  Trash2,
+  CloudDownload
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -68,6 +74,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
   const [queueCount, setQueueCount] = useState<number>(0);
   const [isFlushingQueue, setIsFlushingQueue] = useState<boolean>(false);
 
+  // Spreadsheet Cross-Device Sync state
+  const [isSyncingSpreadsheet, setIsSyncingSpreadsheet] = useState<boolean>(false);
+  const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('cbt_last_sync_time') || null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Delete student modal state
+  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [isDeletingStudent, setIsDeletingStudent] = useState<boolean>(false);
+
   // Submissions state
   const [submittedNisns, setSubmittedNisns] = useState<string[]>([]);
   const [studentSubmissions, setStudentSubmissions] = useState<Record<string, SubmissionPayload>>({});
@@ -78,14 +99,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
     setWebhookUrl(getWebhookUrl());
     setCurrentExamToken(getExamToken());
 
-    // Load stored submissions if any
     const map: Record<string, SubmissionPayload> = {};
+
+    // 1. Load submissions downloaded/synced from Google Spreadsheet
+    const synced = getSyncedSubmissions();
+    Object.keys(synced).forEach(nisn => {
+      map[nisn] = synced[nisn];
+    });
+
+    // 2. Load stored submissions from offline queue
     const queue = getOfflineQueue();
     queue.forEach(item => {
       map[item.nisn] = item;
     });
 
-    // Also scan local states for in-progress exams
+    // 3. Scan local states for in-progress exams
     STUDENTS_DATA.forEach(s => {
       try {
         const stored = localStorage.getItem(`cbt_state_${s.nisn}`);
@@ -119,9 +147,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
     setStudentSubmissions(map);
   };
 
+  const handleSyncFromSpreadsheet = async () => {
+    setIsSyncingSpreadsheet(true);
+    setSyncFeedback(null);
+    try {
+      const res = await fetchSubmissionsFromSpreadsheet(webhookUrl);
+      reloadData();
+      const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastSyncTime(timeStr);
+      try {
+        localStorage.setItem('cbt_last_sync_time', timeStr);
+      } catch {}
+
+      if (res.success) {
+        setSyncFeedback({
+          type: 'success',
+          text: res.message
+        });
+      } else {
+        setSyncFeedback({
+          type: 'error',
+          text: res.message
+        });
+      }
+    } catch (e: any) {
+      setSyncFeedback({
+        type: 'error',
+        text: `Gagal sinkronisasi: ${e.message || e}`
+      });
+    } finally {
+      setIsSyncingSpreadsheet(false);
+      setTimeout(() => {
+        setSyncFeedback(null);
+      }, 7000);
+    }
+  };
+
+  const handlePromptDelete = (student: Student) => {
+    setStudentToDelete(student);
+  };
+
+  const handleConfirmDeleteStudent = async () => {
+    if (!studentToDelete) return;
+    setIsDeletingStudent(true);
+    try {
+      const res = await deleteStudentSubmission(studentToDelete.nisn);
+      reloadData();
+      if (selectedStudentForDetail?.nisn === studentToDelete.nisn) {
+        setSelectedStudentForDetail(null);
+      }
+      setSyncFeedback({
+        type: 'success',
+        text: `✓ ${res.message}`
+      });
+      setTimeout(() => setSyncFeedback(null), 6000);
+      setStudentToDelete(null);
+    } catch (e: any) {
+      alert(`Gagal menghapus siswa: ${e.message || e}`);
+    } finally {
+      setIsDeletingStudent(false);
+    }
+  };
+
   useEffect(() => {
     reloadData();
-    const interval = setInterval(reloadData, 4000);
+    // Auto-fetch from spreadsheet on initial load to get submissions from other devices
+    if (getWebhookUrl()) {
+      fetchSubmissionsFromSpreadsheet().then(() => {
+        reloadData();
+      }).catch(() => {});
+    }
+    const interval = setInterval(reloadData, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -356,6 +452,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
 
         <div className="flex items-center gap-2">
           <button
+            onClick={handleSyncFromSpreadsheet}
+            disabled={isSyncingSpreadsheet}
+            className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-60"
+            title="Tarik data terbaru dari Google Spreadsheet ke perangkat ini"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSpreadsheet ? 'animate-spin' : ''}`} />
+            <span>{isSyncingSpreadsheet ? 'Mengunduh...' : 'Sinkronkan Data'}</span>
+          </button>
+
+          <button
             onClick={() => setShowChangePassModal(true)}
             className="flex items-center gap-1.5 text-xs bg-white/10 hover:bg-white/20 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors border border-white/20 cursor-pointer"
             title="Ganti Kata Sandi Portal"
@@ -423,6 +529,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
         {/* TAB 1: MONITORING */}
         {activeTab === 'monitoring' && (
           <div className="space-y-6">
+            {/* Sync Feedback Toast / Banner */}
+            {syncFeedback && (
+              <div className={`p-3.5 rounded-xl text-xs font-semibold flex items-center justify-between shadow-xs border transition-all ${
+                syncFeedback.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                  : 'bg-red-50 text-red-900 border-red-300'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{syncFeedback.text}</span>
+                </div>
+                <button
+                  onClick={() => setSyncFeedback(null)}
+                  className="text-gray-400 hover:text-gray-700 font-bold ml-3 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Active Exam Token Banner */}
             <div className="bg-gradient-to-r from-[#132a4c] to-[#1e3a63] text-white rounded-2xl p-4 sm:p-5 shadow-sm border border-blue-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -555,9 +681,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
                   </select>
 
                   <button
+                    onClick={handleSyncFromSpreadsheet}
+                    disabled={isSyncingSpreadsheet}
+                    className="px-3 py-2 bg-[#132a4c] hover:bg-[#1e3a63] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow-xs"
+                    title="Tarik data nilai & jawaban siswa dari Google Spreadsheet ke perangkat ini"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSpreadsheet ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingSpreadsheet ? 'Menyinkronkan...' : 'Sinkronkan Spreadsheet'}</span>
+                    {lastSyncTime && (
+                      <span className="text-[10px] text-blue-200 font-normal hidden lg:inline">
+                        ({lastSyncTime})
+                      </span>
+                    )}
+                  </button>
+
+                  <button
                     onClick={reloadData}
                     className="p-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 text-xs font-semibold flex items-center gap-1 cursor-pointer"
-                    title="Refresh Data"
+                    title="Refresh Data Lokal"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
@@ -680,13 +821,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>
                                 {(isDone || isProgress) && (
-                                  <button
-                                    onClick={() => handleResetStudent(student)}
-                                    className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-colors cursor-pointer"
-                                    title="Reset Sesi Ujian Siswa Ini"
-                                  >
-                                    <RefreshCw className="w-3.5 h-3.5" />
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => handleResetStudent(student)}
+                                      className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 transition-colors cursor-pointer"
+                                      title="Reset Sesi Lokal Siswa"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handlePromptDelete(student)}
+                                      className="p-1.5 rounded-lg bg-red-50 hover:bg-red-600 hover:text-white text-red-600 transition-colors cursor-pointer"
+                                      title="Hapus Siswa &amp; Hapus dari Spreadsheet"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
                                 )}
                               </div>
                             </td>
@@ -727,19 +877,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
                 <label className="block text-xs font-bold uppercase tracking-wider text-gray-700 mb-1.5">
                   URL Aplikasi Web Google Apps Script (Web App URL)
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap sm:flex-nowrap gap-2">
                   <input
                     type="url"
                     placeholder="https://script.google.com/macros/s/.../exec"
                     value={webhookUrl}
                     onChange={e => setWebhookUrl(e.target.value)}
-                    className="flex-1 p-2.5 border border-gray-300 rounded-xl text-xs font-mono focus:outline-none focus:border-[#132a4c]"
+                    className="flex-1 min-w-[240px] p-2.5 border border-gray-300 rounded-xl text-xs font-mono focus:outline-none focus:border-[#132a4c]"
                   />
                   <button
                     onClick={handleSaveWebhook}
-                    className="bg-[#132a4c] hover:bg-[#1e3a63] text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-xs cursor-pointer"
+                    className="bg-[#132a4c] hover:bg-[#1e3a63] text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-xs cursor-pointer whitespace-nowrap"
                   >
                     Simpan URL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWebhookUrl(DEFAULT_WEBHOOK_URL);
+                      saveWebhookUrl(DEFAULT_WEBHOOK_URL);
+                      setTestStatus('URL berhasil dikembalikan ke URL default spreadsheet baru.');
+                      setTimeout(() => setTestStatus(''), 3500);
+                    }}
+                    title="Gunakan URL default spreadsheet baru"
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3.5 py-2.5 rounded-xl font-semibold text-xs border border-gray-300 cursor-pointer whitespace-nowrap"
+                  >
+                    Reset Default
                   </button>
                 </div>
                 <div className="text-[11px] text-gray-500 mt-1">
@@ -993,17 +1156,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
                     )}
                   </div>
 
-                  {/* Reset Option */}
-                  <div className="pt-2 flex justify-between items-center border-t border-gray-100">
+                  {/* Action Buttons in Detail Modal */}
+                  <div className="pt-3 flex flex-wrap justify-between items-center gap-2 border-t border-gray-100">
                     <span className="text-[11px] text-gray-500">
-                      Butuh memberi kesempatan ulang karena kendala teknis perangkat?
+                      Tindakan Pengawas Ruang:
                     </span>
-                    <button
-                      onClick={() => handleResetStudent(selectedStudentForDetail)}
-                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
-                    >
-                      Reset Sesi Siswa Ini
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleResetStudent(selectedStudentForDetail)}
+                        className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-semibold cursor-pointer"
+                      >
+                        Reset Sesi Lokal
+                      </button>
+                      <button
+                        onClick={() => {
+                          const s = selectedStudentForDetail;
+                          setSelectedStudentForDetail(null);
+                          handlePromptDelete(s);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Hapus Siswa &amp; Spreadsheet</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1124,6 +1300,72 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBackToLogin })
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Student Submission Confirmation Modal (Requirement 2) */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 text-center shadow-2xl animate-scaleUp border-t-4 border-red-600">
+            <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <h3 className="text-lg font-bold text-gray-900">
+              Hapus Data Siswa &amp; Spreadsheet?
+            </h3>
+
+            <div className="my-3 p-3 bg-red-50 rounded-xl border border-red-200 text-left">
+              <div className="font-bold text-gray-900 text-sm">{studentToDelete.nama}</div>
+              <div className="text-xs text-gray-600 mt-0.5">
+                Rombel: <b>{studentToDelete.rombel}</b> • Jurusan: {studentToDelete.jurusan}
+              </div>
+              <div className="text-xs text-gray-600 font-mono mt-0.5">
+                NISN: <b>{studentToDelete.nisn}</b> • NIPD: {studentToDelete.nipd}
+              </div>
+              {studentSubmissions[studentToDelete.nisn] && (
+                <div className="mt-2 pt-2 border-t border-red-200/70 text-xs flex justify-between">
+                  <span className="text-gray-500">Nilai Tercatat:</span>
+                  <b className="text-red-700 font-bold">{studentSubmissions[studentToDelete.nisn].score} / 100</b>
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-gray-600 mb-5 leading-relaxed text-left">
+              ⚠️ <b>Peringatan:</b> Tindakan ini akan menghapus data pengerjaan siswa ini dari <b>Dashboard Pengawas</b> dan <b>otomatis menghapus barisnya di Google Spreadsheet</b>.
+              <br /><br />
+              Status siswa akan kembali menjadi <i>"Belum Mulai"</i> dan siswa dapat login kembali untuk mengerjakan ujian jika diizinkan pengawas.
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={() => setStudentToDelete(null)}
+                className="flex-1 py-2.5 px-3 border border-gray-200 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={handleConfirmDeleteStudent}
+                className="flex-2 py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer disabled:opacity-60 flex items-center justify-center gap-1.5"
+              >
+                {isDeletingStudent ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Menghapus...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Ya, Hapus Siswa &amp; Spreadsheet</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
